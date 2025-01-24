@@ -8,6 +8,22 @@ let
 
   tomlFormat = pkgs.formats.toml { };
 
+  userSettingsFile = tomlFormat.generate "starship-hm-config" cfg.settings;
+
+  settingsFile = if cfg.presets == [ ] then
+    userSettingsFile
+  else
+    pkgs.runCommand "starship-hm-config" { nativeBuildInputs = [ pkgs.yq ]; } ''
+      tomlq -s -t 'reduce .[] as $item ({}; . * $item)' \
+        ${
+          lib.concatStringsSep " "
+          (map (f: "${cfg.package}/share/starship/presets/${f}.toml")
+            cfg.presets)
+        } \
+        ${userSettingsFile} \
+        > $out
+    '';
+
   starshipCmd = "${config.home.profileDirectory}/bin/starship";
 
   initFish =
@@ -50,6 +66,15 @@ in {
 
         See <https://starship.rs/config/> for the full list
         of options.
+      '';
+    };
+
+    presets = lib.mkOption {
+      default = [ ];
+      example = [ "nerd-font-symbols" ];
+      type = with lib.types; listOf str;
+      description = ''
+        Presets files to be merged with settings in order.
       '';
     };
 
@@ -101,9 +126,10 @@ in {
   config = mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    xdg.configFile."starship.toml" = mkIf (cfg.settings != { }) {
-      source = tomlFormat.generate "starship-config" cfg.settings;
-    };
+    xdg.configFile."starship.toml" =
+      mkIf ((cfg.settings != { }) || (cfg.presets != [ ])) {
+        source = settingsFile;
+      };
 
     programs.bash.initExtra = mkIf cfg.enableBashIntegration ''
       if [[ $TERM != "dumb" ]]; then
